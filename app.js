@@ -529,7 +529,9 @@ function archiveCurrentGoal() {
 }
 
 /* ---------------- Generic composer (expanding + button) ---------------- */
-function attachComposer(container, placeholder, onSave) {
+function attachComposer(container, placeholder, onSave, options) {
+  options = options || {};
+  const showGoalPicker = !!options.showGoalPicker;
   const wrap = document.createElement('div');
   wrap.className = 'composer';
   wrap.innerHTML = `
@@ -540,9 +542,17 @@ function attachComposer(container, placeholder, onSave) {
   `;
   const closedEl = wrap.querySelector('.composer-closed');
   closedEl.addEventListener('click', () => {
+    let selectedGoalId = null;
+    const goalPickerHtml = showGoalPicker ? `
+      <div class="composer-goal-picker" id="cgp-${Math.random().toString(36).slice(2)}">
+        <button type="button" class="goal-chip selected" data-goal="">General</button>
+        ${state.goals.filter(g => !g.archived).map(g => `<button type="button" class="goal-chip" data-goal="${g.id}" style="--chip-color:${g.color}"><span class="chip-dot" style="background:${g.color}"></span>${escapeHtml(g.name)}</button>`).join('')}
+      </div>
+    ` : '';
     wrap.innerHTML = `
       <div class="composer-open">
         <textarea class="autogrow" placeholder="${escapeHtml(placeholder)}"></textarea>
+        ${goalPickerHtml}
         <div class="composer-actions">
           <button class="btn secondary small composer-cancel">Cancel</button>
           <button class="btn small composer-save">Add</button>
@@ -553,9 +563,18 @@ function attachComposer(container, placeholder, onSave) {
     ta.focus();
     autoGrow(ta);
     ta.addEventListener('input', () => autoGrow(ta));
+    if (showGoalPicker) {
+      wrap.querySelectorAll('.goal-chip').forEach(chip => {
+        chip.addEventListener('click', () => {
+          wrap.querySelectorAll('.goal-chip').forEach(c => c.classList.remove('selected'));
+          chip.classList.add('selected');
+          selectedGoalId = chip.dataset.goal || null;
+        });
+      });
+    }
     wrap.querySelector('.composer-save').addEventListener('click', () => {
       const text = ta.value.trim();
-      if (text) onSave(text);
+      if (text) onSave(text, selectedGoalId);
       collapse();
     });
     wrap.querySelector('.composer-cancel').addEventListener('click', collapse);
@@ -800,13 +819,13 @@ function openDaySheet(key) {
   progressBox.innerHTML = '';
   const items = state.progress.daily[key] || [];
   items.slice().reverse().forEach(item => progressBox.appendChild(renderProgressItem(item, 'daily', key)));
-  attachComposer(progressBox, 'Add a note — what did you do today?', (text) => {
+  attachComposer(progressBox, 'Add a note — what did you do today?', (text, goalId) => {
     if (!state.progress.daily[key]) state.progress.daily[key] = [];
-    state.progress.daily[key].push({ id: uid(), text, createdAt: Date.now() });
+    state.progress.daily[key].push({ id: uid(), text, goalId: goalId || null, createdAt: Date.now() });
     saveState();
     updateCalendarDay(key);
     openDaySheet(key);
-  });
+  }, { showGoalPicker: true });
 
   openSheet('day-sheet');
 }
@@ -817,7 +836,13 @@ function renderProgressItem(item, scope, key) {
   const row = document.createElement('div');
   row.className = 'progress-item';
   const time = new Date(item.createdAt).toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' });
-  row.innerHTML = `<div class="txt">${escapeHtml(item.text)}<div class="ts">${time}</div></div><button class="del">✕</button>`;
+  const goal = item.goalId ? state.goals.find(g => g.id === item.goalId) : null;
+  if (goal) {
+    row.style.borderLeft = `3px solid ${goal.color}`;
+    row.innerHTML = `<div class="txt"><div class="progress-goal-tag" style="color:${goal.color}"><span class="chip-dot" style="background:${goal.color}"></span>${escapeHtml(goal.name)}</div>${escapeHtml(item.text)}<div class="ts">${time}</div></div><button class="del">✕</button>`;
+  } else {
+    row.innerHTML = `<div class="txt">${escapeHtml(item.text)}<div class="ts">${time}</div></div><button class="del">✕</button>`;
+  }
   row.querySelector('.del').addEventListener('click', () => {
     state.progress[scope][key] = state.progress[scope][key].filter(i => i.id !== item.id);
     saveState();
@@ -882,13 +907,13 @@ function renderProgress() {
   const composerHost = document.getElementById('progress-composer-host');
   composerHost.innerHTML = '';
   const placeholders = { daily: "What did you do today?", weekly: "What's the target this week?", monthly: "What's the milestone this month?", yearly: "What's the vision for this year?" };
-  attachComposer(composerHost, placeholders[progressScope], (text) => {
+  attachComposer(composerHost, placeholders[progressScope], (text, goalId) => {
     if (!state.progress[progressScope][key]) state.progress[progressScope][key] = [];
-    state.progress[progressScope][key].push({ id: uid(), text, createdAt: Date.now() });
+    state.progress[progressScope][key].push({ id: uid(), text, goalId: goalId || null, createdAt: Date.now() });
     saveState();
     renderProgress();
     if (progressScope === 'daily') updateCalendarDay(key);
-  });
+  }, { showGoalPicker: true });
 }
 
 // Draggable Sun–Sat (and beyond) day picker for the daily Progress scope,
@@ -1104,6 +1129,26 @@ function autoGrow(el) {
 }
 
 /* ---------------- Init ---------------- */
+
+// iOS Safari sometimes leaves the layout viewport stuck at the smaller,
+// keyboard-open height after the keyboard closes (especially in standalone
+// PWA mode), which shows up as the whole screen appearing shifted up with
+// dead space at the bottom. Track the real visible height ourselves and
+// recompute whenever it could have changed, rather than trusting dvh alone.
+function setAppHeight() {
+  const h = (window.visualViewport ? window.visualViewport.height : window.innerHeight);
+  document.documentElement.style.setProperty('--app-height', h + 'px');
+}
+setAppHeight();
+window.addEventListener('resize', setAppHeight);
+window.addEventListener('orientationchange', () => setTimeout(setAppHeight, 150));
+if (window.visualViewport) {
+  window.visualViewport.addEventListener('resize', setAppHeight);
+  window.visualViewport.addEventListener('scroll', setAppHeight);
+}
+document.addEventListener('visibilitychange', () => { if (!document.hidden) setAppHeight(); });
+document.addEventListener('focusout', () => setTimeout(setAppHeight, 200));
+
 function init() {
   applyTheme();
   document.getElementById('header-date').textContent = new Date().toLocaleDateString(undefined, { weekday: 'long', month: 'long', day: 'numeric' });
