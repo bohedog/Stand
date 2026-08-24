@@ -221,36 +221,139 @@ function renderTodayFocus() {
     return;
   }
 
-  const todaysLog = state.logs[key] || {};
-  activeGoals.forEach(g => {
-    const entry = todaysLog[g.id];
+  activeGoals.forEach(g => list.appendChild(buildGoalFocusElement(g, key, 'tap to log today')));
+}
+
+function computeGoalDone(goal, entry) {
+  if (!entry) return false;
+  if (goal.breakdown.daily.length > 0) {
+    return goal.breakdown.daily.every(item => entry.itemsDone && entry.itemsDone[item.id]);
+  }
+  return !!entry.done;
+}
+
+// Shared builder used by both the Today page and the Calendar day-sheet, so
+// every active goal's daily breakdown items always show up as individually
+// checkable rows (not lumped into one line under a single checkbox).
+function buildGoalFocusElement(goal, dateKey, emptyMetaText) {
+  const entry = (state.logs[dateKey] && state.logs[dateKey][goal.id]) || null;
+  const hasItems = goal.breakdown.daily.length > 0;
+
+  if (!hasItems) {
     const done = entry && entry.done;
     const row = document.createElement('div');
     row.className = 'goal-card';
     row.style.cursor = 'default';
     row.innerHTML = `
-      <div class="goal-swatch" style="background:${g.color}"></div>
+      <div class="goal-swatch" style="background:${goal.color}"></div>
       <div class="goal-info" data-open="1">
-        <div class="goal-name">${escapeHtml(g.name)}</div>
-        <div class="goal-meta">${g.breakdown.daily.length ? escapeHtml(g.breakdown.daily.map(i => i.text).join(' · ')) : 'tap to log today'}</div>
-        ${entry && entry.text ? `<div class="goal-note-preview">"${escapeHtml(entry.text)}"</div>` : ''}
+        <div class="goal-name">${escapeHtml(goal.name)}</div>
+        ${entry && entry.text ? `<div class="goal-note-preview">"${escapeHtml(entry.text)}"</div>` : `<div class="goal-meta">${emptyMetaText}</div>`}
       </div>
-      <button class="goal-log-btn ${done ? 'done' : ''}" data-goal="${g.id}">${done ? '✓' : ''}</button>
+      <button class="goal-log-btn ${done ? 'done' : ''}" data-goal="${goal.id}">${done ? '✓' : ''}</button>
     `;
-    row.querySelector('.goal-log-btn').addEventListener('click', (e) => { e.stopPropagation(); toggleDone(g.id, key); });
-    row.querySelector('[data-open]').addEventListener('click', () => openJournalSheet(g.id, key));
-    list.appendChild(row);
+    row.querySelector('.goal-log-btn').addEventListener('click', (e) => { e.stopPropagation(); toggleDone(goal.id, dateKey); });
+    row.querySelector('[data-open]').addEventListener('click', () => openJournalSheet(goal.id, dateKey));
+    return row;
+  }
+
+  const itemsDone = (entry && entry.itemsDone) || {};
+  const allDone = computeGoalDone(goal, entry);
+  const group = document.createElement('div');
+  group.className = 'goal-focus-group';
+  group.innerHTML = `
+    <div class="gfg-header" data-goal="${goal.id}">
+      <span class="goal-swatch" style="background:${goal.color}"></span>
+      <span class="gfg-name">${escapeHtml(goal.name)}</span>
+      ${allDone ? '<span class="gfg-check">✓ all done</span>' : ''}
+    </div>
+    ${entry && entry.text ? `<div class="goal-note-preview gfg-note">"${escapeHtml(entry.text)}"</div>` : ''}
+    <div class="gfg-items">
+      ${goal.breakdown.daily.map(item => `
+        <div class="daily-item-row${itemsDone[item.id] ? ' done-text' : ''}">
+          <span class="di-text">${escapeHtml(item.text)}</span>
+          <button class="di-check ${itemsDone[item.id] ? 'checked' : ''}" data-goal="${goal.id}" data-item="${item.id}">${itemsDone[item.id] ? '✓' : ''}</button>
+        </div>
+      `).join('')}
+    </div>
+  `;
+  group.querySelector('.gfg-header').addEventListener('click', () => openJournalSheet(goal.id, dateKey));
+  group.querySelectorAll('.di-check').forEach(btn => {
+    btn.addEventListener('click', (e) => { e.stopPropagation(); toggleDailyItem(goal.id, btn.dataset.item, dateKey); });
   });
+  return group;
 }
 
 function toggleDone(goalId, dateKey) {
+  // Manual whole-goal toggle — only used for goals with no daily breakdown items.
   if (!state.logs[dateKey]) state.logs[dateKey] = {};
   const existing = state.logs[dateKey][goalId];
   const nowDone = !(existing && existing.done);
-  state.logs[dateKey][goalId] = { done: nowDone, text: existing ? existing.text : '', loggedAt: Date.now() };
+  state.logs[dateKey][goalId] = { done: nowDone, text: existing ? existing.text : '', itemsDone: existing ? existing.itemsDone : {}, loggedAt: Date.now() };
   saveState();
   patchAfterLogChange(goalId, dateKey);
   if (nowDone) showToast('Logged. Keep the streak alive.');
+}
+
+function toggleDailyItem(goalId, itemId, dateKey) {
+  const goal = state.goals.find(g => g.id === goalId);
+  if (!goal) return;
+  if (!state.logs[dateKey]) state.logs[dateKey] = {};
+  if (!state.logs[dateKey][goalId]) state.logs[dateKey][goalId] = { done: false, text: '', itemsDone: {}, loggedAt: Date.now() };
+  const entry = state.logs[dateKey][goalId];
+  if (!entry.itemsDone) entry.itemsDone = {};
+  entry.itemsDone[itemId] = !entry.itemsDone[itemId];
+  entry.done = computeGoalDone(goal, entry);
+  entry.loggedAt = Date.now();
+  saveState();
+  patchItemCheckbox(goalId, itemId, dateKey, entry.itemsDone[itemId], entry.done);
+  updateCalendarDay(dateKey);
+  if (dateKey === todayKey()) renderWrapCard();
+  if (entry.done) showToast('Logged. Keep the streak alive.');
+}
+
+function affectedContainerIds(dateKey) {
+  const ids = [];
+  if (dateKey === todayKey()) ids.push('today-goal-list');
+  const dsDate = document.getElementById('day-sheet-date');
+  if (dsDate && dsDate.value === dateKey) ids.push('day-sheet-goals');
+  return ids;
+}
+
+function patchItemCheckbox(goalId, itemId, dateKey, checked, allDone) {
+  affectedContainerIds(dateKey).forEach(containerId => {
+    const container = document.getElementById(containerId);
+    if (!container) return;
+    const btn = container.querySelector(`.di-check[data-goal="${goalId}"][data-item="${itemId}"]`);
+    if (btn) {
+      btn.classList.toggle('checked', checked);
+      btn.textContent = checked ? '✓' : '';
+      btn.closest('.daily-item-row').classList.toggle('done-text', checked);
+    }
+    const header = container.querySelector(`.gfg-header[data-goal="${goalId}"]`);
+    if (header) {
+      const mark = header.querySelector('.gfg-check');
+      if (allDone && !mark) header.insertAdjacentHTML('beforeend', '<span class="gfg-check">✓ all done</span>');
+      if (!allDone && mark) mark.remove();
+    }
+  });
+}
+
+function patchGoalGroupNote(goalId, dateKey, text) {
+  affectedContainerIds(dateKey).forEach(containerId => {
+    const container = document.getElementById(containerId);
+    if (!container) return;
+    const header = container.querySelector(`.gfg-header[data-goal="${goalId}"]`);
+    if (!header) return;
+    const group = header.closest('.goal-focus-group');
+    const note = group.querySelector('.gfg-note');
+    if (text) {
+      const html = `<div class="goal-note-preview gfg-note">"${escapeHtml(text)}"</div>`;
+      if (note) note.outerHTML = html; else header.insertAdjacentHTML('afterend', html);
+    } else if (note) {
+      note.remove();
+    }
+  });
 }
 
 // Updates just the affected button/text in place (Today list, Day sheet, Calendar cell,
@@ -260,12 +363,11 @@ function patchAfterLogChange(goalId, dateKey) {
   const entry = state.logs[dateKey][goalId];
   const done = entry.done, text = entry.text;
   if (dateKey === todayKey()) {
-    const g = state.goals.find(x => x.id === goalId);
-    const metaDefault = g && g.breakdown.daily.length ? escapeHtml(g.breakdown.daily.map(i => i.text).join(' · ')) : 'tap to log today';
-    patchGoalRow('today-goal-list', goalId, done, text, metaDefault);
+    patchGoalRow('today-goal-list', goalId, done, text, 'tap to log today');
     renderWrapCard();
   }
-  if (document.getElementById('day-sheet-date') && document.getElementById('day-sheet-date').value === dateKey) {
+  const dsDate = document.getElementById('day-sheet-date');
+  if (dsDate && dsDate.value === dateKey) {
     patchGoalRow('day-sheet-goals', goalId, done, text, 'tap to log what you did');
   }
   updateCalendarDay(dateKey);
@@ -275,7 +377,7 @@ function patchGoalRow(containerId, goalId, done, text, emptyMetaHtml) {
   const container = document.getElementById(containerId);
   if (!container) return false;
   const btn = container.querySelector(`.goal-log-btn[data-goal="${goalId}"]`);
-  if (!btn) return false;
+  if (!btn) return false; // item-based goal group — nothing to patch here
   btn.classList.toggle('done', done);
   btn.textContent = done ? '✓' : '';
   const row = btn.closest('.goal-card');
@@ -297,24 +399,32 @@ function openJournalSheet(goalId, dateKey) {
   if (!g) return;
   journalCtx = { goalId, dateKey };
   const entry = (state.logs[dateKey] && state.logs[dateKey][goalId]) || { text: '', done: false };
+  const hasItems = g.breakdown.daily.length > 0;
   document.getElementById('journal-sheet-title').textContent = g.name;
   document.getElementById('journal-sheet-date').textContent = parseDateKey(dateKey).toLocaleDateString(undefined, { weekday: 'long', month: 'long', day: 'numeric' });
   document.getElementById('journal-text').value = entry.text || '';
   document.getElementById('journal-done-toggle').classList.toggle('on', !!entry.done);
+  document.getElementById('journal-done-row').style.display = hasItems ? 'none' : 'flex';
+  document.getElementById('journal-items-note').style.display = hasItems ? 'block' : 'none';
   autoGrow(document.getElementById('journal-text'));
   openSheet('journal-sheet');
 }
 function saveJournalEntry() {
   if (!journalCtx) return;
   const { goalId, dateKey } = journalCtx;
+  const goal = state.goals.find(g => g.id === goalId);
   const text = document.getElementById('journal-text').value.trim();
   if (!state.logs[dateKey]) state.logs[dateKey] = {};
-  const existing = state.logs[dateKey][goalId] || {};
-  const done = document.getElementById('journal-done-toggle').classList.contains('on') || !!text;
-  state.logs[dateKey][goalId] = { text, done, loggedAt: Date.now() };
+  const existing = state.logs[dateKey][goalId] || { itemsDone: {} };
+  const hasItems = goal && goal.breakdown.daily.length > 0;
+  const done = hasItems
+    ? computeGoalDone(goal, existing)
+    : (document.getElementById('journal-done-toggle').classList.contains('on') || !!text);
+  state.logs[dateKey][goalId] = { text, done, itemsDone: existing.itemsDone || {}, loggedAt: Date.now() };
   saveState();
   closeSheet('journal-sheet');
   patchAfterLogChange(goalId, dateKey);
+  patchGoalGroupNote(goalId, dateKey, text);
   showToast('Saved.');
 }
 function toggleJournalDone() {
@@ -796,23 +906,7 @@ function openDaySheet(key) {
   if (relevantGoals.length === 0) {
     goalsBox.innerHTML = `<div class="empty-state">No goals to log against this day.</div>`;
   } else {
-    relevantGoals.forEach(g => {
-      const entry = dayLog[g.id] || { text: '', done: false };
-      const row = document.createElement('div');
-      row.className = 'goal-card';
-      row.style.cursor = 'default';
-      row.innerHTML = `
-        <div class="goal-swatch" style="background:${g.color}"></div>
-        <div class="goal-info" data-open="1">
-          <div class="goal-name">${escapeHtml(g.name)}</div>
-          ${entry.text ? `<div class="goal-note-preview">"${escapeHtml(entry.text)}"</div>` : `<div class="goal-meta">tap to log what you did</div>`}
-        </div>
-        <button class="goal-log-btn ${entry.done ? 'done' : ''}" data-goal="${g.id}">${entry.done ? '✓' : ''}</button>
-      `;
-      row.querySelector('.goal-log-btn').addEventListener('click', (e) => { e.stopPropagation(); toggleDone(g.id, key); });
-      row.querySelector('[data-open]').addEventListener('click', () => openJournalSheet(g.id, key));
-      goalsBox.appendChild(row);
-    });
+    relevantGoals.forEach(g => goalsBox.appendChild(buildGoalFocusElement(g, key, 'tap to log what you did')));
   }
 
   const progressBox = document.getElementById('day-sheet-progress');
@@ -835,21 +929,68 @@ function openDaySheet(key) {
 function renderProgressItem(item, scope, key) {
   const row = document.createElement('div');
   row.className = 'progress-item';
+  renderProgressItemView(row, item, scope, key);
+  return row;
+}
+
+function renderProgressItemView(row, item, scope, key) {
   const time = new Date(item.createdAt).toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' });
   const goal = item.goalId ? state.goals.find(g => g.id === item.goalId) : null;
-  if (goal) {
-    row.style.borderLeft = `3px solid ${goal.color}`;
-    row.innerHTML = `<div class="txt"><div class="progress-goal-tag" style="color:${goal.color}"><span class="chip-dot" style="background:${goal.color}"></span>${escapeHtml(goal.name)}</div>${escapeHtml(item.text)}<div class="ts">${time}</div></div><button class="del">✕</button>`;
-  } else {
-    row.innerHTML = `<div class="txt">${escapeHtml(item.text)}<div class="ts">${time}</div></div><button class="del">✕</button>`;
-  }
+  row.style.borderLeft = goal ? `3px solid ${goal.color}` : '';
+  const tagHtml = goal ? `<div class="progress-goal-tag" style="color:${goal.color}"><span class="chip-dot" style="background:${goal.color}"></span>${escapeHtml(goal.name)}</div>` : '';
+  row.innerHTML = `
+    <div class="txt">${tagHtml}${escapeHtml(item.text)}<div class="ts">${time}</div></div>
+    <button class="item-edit" aria-label="Edit"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 20h9M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4Z"/></svg></button>
+    <button class="del">✕</button>
+  `;
+  row.querySelector('.item-edit').addEventListener('click', () => renderProgressItemEdit(row, item, scope, key));
   row.querySelector('.del').addEventListener('click', () => {
     state.progress[scope][key] = state.progress[scope][key].filter(i => i.id !== item.id);
     saveState();
     if (activeView === 'progress') renderProgress();
     updateCalendarDay(key);
   });
-  return row;
+}
+
+function renderProgressItemEdit(row, item, scope, key) {
+  const goals = state.goals.filter(g => !g.archived);
+  row.style.borderLeft = '';
+  row.innerHTML = `
+    <div class="progress-edit-form">
+      <textarea class="autogrow">${escapeHtml(item.text)}</textarea>
+      <div class="composer-goal-picker">
+        <button type="button" class="goal-chip${!item.goalId ? ' selected' : ''}" data-goal="">General</button>
+        ${goals.map(g => `<button type="button" class="goal-chip${item.goalId === g.id ? ' selected' : ''}" data-goal="${g.id}" style="--chip-color:${g.color}"><span class="chip-dot" style="background:${g.color}"></span>${escapeHtml(g.name)}</button>`).join('')}
+      </div>
+      <div class="composer-actions">
+        <button class="btn secondary small edit-cancel">Cancel</button>
+        <button class="btn small edit-save">Save</button>
+      </div>
+    </div>
+  `;
+  let selectedGoalId = item.goalId || null;
+  const ta = row.querySelector('textarea');
+  autoGrow(ta);
+  ta.addEventListener('input', () => autoGrow(ta));
+  ta.focus();
+  row.querySelectorAll('.goal-chip').forEach(chip => {
+    chip.addEventListener('click', () => {
+      row.querySelectorAll('.goal-chip').forEach(c => c.classList.remove('selected'));
+      chip.classList.add('selected');
+      selectedGoalId = chip.dataset.goal || null;
+    });
+  });
+  row.querySelector('.edit-cancel').addEventListener('click', () => renderProgressItemView(row, item, scope, key));
+  row.querySelector('.edit-save').addEventListener('click', () => {
+    const text = ta.value.trim();
+    if (!text) { showToast("Note can't be empty."); return; }
+    item.text = text;
+    item.goalId = selectedGoalId;
+    item.editedAt = Date.now();
+    saveState();
+    renderProgressItemView(row, item, scope, key);
+    updateCalendarDay(key);
+  });
 }
 
 function setProgressScope(scope) {

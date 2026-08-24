@@ -202,10 +202,11 @@
   <div class="journal-box">
     <textarea id="journal-text" class="autogrow" placeholder="What did you do today toward this goal?"></textarea>
   </div>
-  <div class="settings-row" style="margin-top:14px;">
+  <div class="settings-row" id="journal-done-row" style="margin-top:14px;">
     <div class="label">Mark as done today</div>
     <button class="toggle" id="journal-done-toggle"></button>
   </div>
+  <p id="journal-items-note" style="display:none; font-size:11px; color:var(--ink-soft); margin-top:14px;">This goal is marked done automatically once every daily item is checked off.</p>
   <div class="sheet-actions">
     <button class="btn secondary" data-close-sheet="journal-sheet">Cancel</button>
     <button class="btn" id="journal-save-btn">Save</button>

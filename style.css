@@ -67,7 +67,7 @@ html, body { height: 100%; }
 body {
   height: 100vh;
   height: 100dvh;
-  height: calc(var(--app-height, 100dvh));
+  height: max(100dvh, var(--app-height, 0px));
   display: flex;
   flex-direction: column;
   overflow: hidden;
@@ -238,6 +238,34 @@ main.cal-mode { overflow: hidden; padding: 0; }
 }
 .goal-log-btn.done { background: var(--forest); border-color: var(--forest); color: var(--fixed-light); }
 
+/* Goal focus group — a goal with daily breakdown items, each individually checkable */
+.goal-focus-group {
+  background: var(--card);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  padding: 12px 14px;
+  margin-bottom: 8px;
+}
+.gfg-header { display: flex; align-items: center; gap: 10px; cursor: pointer; }
+.gfg-header .goal-swatch { flex-shrink: 0; }
+.gfg-name { font-weight: 600; font-size: 14px; flex: 1; }
+.gfg-check {
+  font-family: 'JetBrains Mono', monospace; font-size: 9.5px; text-transform: uppercase; letter-spacing: 0.3px;
+  color: var(--forest-bright); flex-shrink: 0;
+}
+.gfg-note { margin-left: 20px; margin-top: 4px; }
+.gfg-items { margin-top: 10px; padding-left: 20px; border-left: 2px solid var(--line); display: flex; flex-direction: column; gap: 8px; }
+.daily-item-row { display: flex; align-items: center; gap: 10px; }
+.daily-item-row .di-text { flex: 1; font-size: 13px; color: var(--ink-soft); }
+.di-check {
+  width: 26px; height: 26px; border-radius: var(--radius-sm); flex-shrink: 0;
+  border: 1px solid var(--line-strong); background: transparent;
+  display: flex; align-items: center; justify-content: center;
+  font-size: 13px; color: var(--ink); cursor: pointer;
+}
+.di-check.checked { background: var(--forest); border-color: var(--forest); color: var(--fixed-light); }
+.daily-item-row.done-text .di-text { color: var(--ink); text-decoration: line-through; text-decoration-color: var(--line-strong); }
+
 /* ---------- Buttons ---------- */
 .btn {
   font-family: 'JetBrains Mono', monospace;
@@ -395,7 +423,7 @@ nav.tabbar button.active svg { stroke: var(--gold); }
 
 .cal-grid { display: grid; grid-template-columns: repeat(7, 1fr); border-left: 1px solid var(--line); border-top: 1px solid var(--line); }
 .cal-cell { border-right: 1px solid var(--line); border-bottom: 1px solid var(--line); min-height: 50px; padding: 4px 4px 6px; position: relative; cursor: pointer; }
-.cal-cell.outside { background: rgba(0,0,0,0.02); visibility: hidden; pointer-events: none; }
+.cal-cell.outside { background: rgba(0,0,0,0.015); pointer-events: none; }
 .cal-cell.today { background: rgba(184,137,43,0.12); }
 .cal-cell .daynum { font-family: 'JetBrains Mono', monospace; font-size: 10px; color: var(--ink-soft); }
 .cal-cell.today .daynum { color: var(--gold); font-weight: 700; }
@@ -473,7 +501,15 @@ nav.tabbar button.active svg { stroke: var(--gold); }
 }
 .progress-item .txt { flex: 1; font-size: 13.5px; line-height: 1.4; white-space: pre-wrap; }
 .progress-item .del { background: none; border: none; color: var(--ink-faint); font-size: 15px; cursor: pointer; padding: 0 2px; flex-shrink: 0; }
+.progress-item .item-edit { background: none; border: none; color: var(--ink-faint); cursor: pointer; padding: 0 2px; flex-shrink: 0; display: flex; align-items: center; }
+.progress-item .item-edit svg { width: 15px; height: 15px; }
 .progress-item .ts { font-family: 'JetBrains Mono', monospace; font-size: 9.5px; color: var(--ink-faint); margin-top: 4px; }
+.progress-edit-form { width: 100%; }
+.progress-edit-form textarea {
+  width: 100%; border: 1px solid var(--line-strong); background: var(--card-raised); border-radius: var(--radius-sm);
+  padding: 8px 10px; font-size: 13.5px; font-family: 'Inter', sans-serif; color: var(--ink); resize: none; min-height: 44px;
+}
+.progress-edit-form textarea:focus { outline: none; border-color: var(--ink-soft); }
 .progress-goal-tag {
   display: flex; align-items: center; gap: 5px;
   font-family: 'JetBrains Mono', monospace; font-size: 10px; font-weight: 700;
